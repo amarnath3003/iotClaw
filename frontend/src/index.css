@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'DM Sans', sans-serif;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top right, #dbead3 0%, #f4f8f2 45%, #ffffff 100%);
+  color: #1d3618;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #8db57d #f4f8f2;
+}
