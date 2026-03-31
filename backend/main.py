@@ -3,12 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Any
 import google.generativeai as genai
+from dotenv import load_dotenv
 import os, uuid, json, sqlite3
 from datetime import datetime
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from simulation import engine as sim
 from core import execution_engine as exec_eng
+
+# Load variables from backend/.env when present.
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 app = FastAPI(title="OpenClaw Backend")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
