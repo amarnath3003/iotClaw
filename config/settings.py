@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    app_name: str = "OpenClaw"
+    app_name: str = "iotClaw"
     app_env: str = "development"
     secret_key: str = "change-this-to-a-random-secret-key-in-production"
 
