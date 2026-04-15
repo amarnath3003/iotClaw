@@ -6,6 +6,8 @@ import WorkflowEditor from './components/WorkflowEditor.jsx'
 import Dashboard from './components/Dashboard.jsx'
 import TemplateLibrary from './components/TemplateLibrary.jsx'
 import Settings from './components/Settings.jsx'
+import DevicesView from './components/DevicesView.jsx'
+import Onboarding from './components/Onboarding.jsx'
 import { LoginScreen, RegisterScreen } from './components/AuthScreens.jsx'
 import { api } from './api.js'
 
@@ -28,6 +30,9 @@ export default function App() {
   const [wfView, setWfView]           = useState('list')
   const [editingWf, setEditingWf]     = useState(null)
   const [refreshKey, setRefreshKey]   = useState(0)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [simMode, setSimMode]               = useState(true)
+  const [simBannerDismissed, setSimBannerDismissed] = useState(false)
   const [messagesByMode, setMessagesByMode] = useState({
     consumer: [], maker: [], poweruser: []
   })
@@ -38,17 +43,33 @@ export default function App() {
     const token = localStorage.getItem('openclaw_token')
     if (token) {
       api.me()
-        .then(u => { setUser(u); setAuthChecked(true) })
+        .then(u => {
+          setUser(u)
+          setShowOnboarding(!u.onboarding_done)
+          setAuthChecked(true)
+        })
         .catch(() => { localStorage.removeItem('openclaw_token'); setAuthChecked(true) })
     } else {
       setAuthChecked(true)
     }
     const handler = () => { setUser(null); setAuthView('login') }
     window.addEventListener('openclaw:logout', handler)
-    return () => window.removeEventListener('openclaw:logout', handler)
+    const statusPoll = setInterval(async () => {
+      try {
+        const s = await api.getStatus()
+        setSimMode(s.sim_mode)
+      } catch {}
+    }, 5000)
+    return () => {
+      clearInterval(statusPoll)
+      window.removeEventListener('openclaw:logout', handler)
+    }
   }, [])
 
-  function handleLogin(u) { setUser(u) }
+  function handleLogin(u) {
+    setUser(u)
+    setShowOnboarding(!u.onboarding_done)
+  }
 
   function handleLogout() {
     if (!AUTH_ENABLED) return
@@ -68,6 +89,10 @@ export default function App() {
   function handleViewChange(v) {
     setView(v)
     if (v !== 'workflows') setWfView('list')
+  }
+
+  if (showOnboarding && user) {
+    return <Onboarding onComplete={() => setShowOnboarding(false)} />
   }
 
   if (!authChecked) {
@@ -90,32 +115,46 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar
-        mode={mode} setMode={setMode}
-        view={view} setView={handleViewChange}
-        onClear={() => setMessagesByMode(prev => ({ ...prev, [mode]: [] }))}
-        user={user} onLogout={AUTH_ENABLED ? handleLogout : null}
-      />
-      <main className="flex-1 overflow-hidden">
-        {view === 'chat' && (
-          <Chat mode={mode} messages={messagesByMode[mode]}
-            setMessages={setMessages} onWorkflowSaved={bump} />
-        )}
-        {view === 'workflows' && wfView === 'list' && (
-          <WorkflowList refreshKey={refreshKey}
-            onEdit={wf => { setEditingWf(wf); setWfView('editor') }}
-            onNew={() => { setEditingWf(null); setWfView('editor') }} />
-        )}
-        {view === 'workflows' && wfView === 'editor' && (
-          <WorkflowEditor initial={editingWf}
-            onSaved={() => { bump(); setWfView('list'); setEditingWf(null) }}
-            onCancel={() => setWfView('list')} />
-        )}
-        {view === 'dashboard' && <Dashboard />}
-        {view === 'templates' && <TemplateLibrary onActivated={bump} />}
-        {view === 'settings' && <Settings user={user} onLogout={AUTH_ENABLED ? handleLogout : null} />}
-      </main>
+    <div className="flex flex-col h-screen overflow-hidden">
+      {simMode && !simBannerDismissed && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-claw-amber/10 border-b border-claw-amber/20 shrink-0">
+          <span className="text-claw-amber text-xs font-mono">◎</span>
+          <p className="text-claw-amber text-xs font-body flex-1">
+            Simulation mode — showing virtual data. Add real devices in the Devices view.
+          </p>
+          <button onClick={() => setSimBannerDismissed(true)}
+            className="text-claw-amber/60 hover:text-claw-amber text-xs">✕</button>
+        </div>
+      )}
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          mode={mode} setMode={setMode}
+          view={view} setView={handleViewChange}
+          onClear={() => setMessagesByMode(prev => ({ ...prev, [mode]: [] }))}
+          user={user} onLogout={handleLogout}
+          simMode={simMode}
+        />
+        <main className="flex-1 overflow-hidden">
+          {view === 'chat' && (
+            <Chat mode={mode} messages={messagesByMode[mode]}
+              setMessages={setMessages} onWorkflowSaved={bump} />
+          )}
+          {view === 'workflows' && wfView === 'list' && (
+            <WorkflowList refreshKey={refreshKey}
+              onEdit={wf => { setEditingWf(wf); setWfView('editor') }}
+              onNew={() => { setEditingWf(null); setWfView('editor') }} />
+          )}
+          {view === 'workflows' && wfView === 'editor' && (
+            <WorkflowEditor initial={editingWf}
+              onSaved={() => { bump(); setWfView('list'); setEditingWf(null) }}
+              onCancel={() => setWfView('list')} />
+          )}
+          {view === 'dashboard' && <Dashboard />}
+          {view === 'templates' && <TemplateLibrary onActivated={bump} />}
+          {view === 'devices'   && <DevicesView />}
+          {view === 'settings'  && <Settings user={user} onLogout={handleLogout} />}
+        </main>
+      </div>
     </div>
   )
 }
