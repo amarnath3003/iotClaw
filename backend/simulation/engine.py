@@ -21,9 +21,31 @@ state_store = {
     "device/robot":       {"value": "idle", "unit": "state", "label": "Robot",      "controllable": True},
 }
 
-event_queue = []
-exec_log    = []
-notifications = []
+event_queue      = []
+exec_log         = []
+notifications     = []
+_simulation_mode  = True   # becomes False when real hardware sends a message
+
+
+def get_simulation_mode() -> bool:
+    with _lock:
+        return _simulation_mode
+
+
+def set_device_dynamic(topic: str, value, label: str = "",
+                       unit: str = "", is_real: bool = True):
+    """Add/update any device topic — used by real MQTT messages."""
+    global _simulation_mode
+    with _lock:
+        if topic not in state_store:
+            state_store[topic] = {}
+        state_store[topic]["value"]      = value
+        state_store[topic]["label"]      = label or topic.split("/")[-1]
+        state_store[topic]["unit"]       = unit
+        state_store[topic]["sim"]        = not is_real
+        state_store[topic]["updated_at"] = datetime.now().isoformat()
+        if is_real:
+            _simulation_mode = False
 
 def get_state():
     with _lock:
@@ -49,12 +71,25 @@ def drain_events():
         event_queue.clear()
         return evts
 
-def push_exec_log(workflow_name, action, status, detail=""):
+def push_exec_log(workflow_name, action, status, detail="", source="simulation"):
     with _lock:
-        exec_log.append({"ts": datetime.now().isoformat(), "workflow": workflow_name,
-                         "action": action, "status": status, "detail": detail})
-        if len(exec_log) > 300:
+        exec_log.append({
+            "ts":       datetime.now().isoformat(),
+            "workflow": workflow_name,
+            "action":   action,
+            "status":   status,
+            "detail":   detail,
+            "source":   source,
+        })
+        if len(exec_log) > 500:
             exec_log.pop(0)
+
+    # Also persist to SQLite
+    try:
+        from core.device_registry import log_execution
+        log_execution(workflow_name, action, status, detail, source)
+    except Exception:
+        pass
 
 def get_exec_log():
     with _lock:
@@ -117,7 +152,11 @@ def _try_broadcast():
         manager  = getattr(main_mod, "ws_manager", None)
         if manager and manager._conns:
             state = get_state()
-            asyncio.run(manager.broadcast({"type": "state", "data": state}))
+            asyncio.run(manager.broadcast({
+                "type":     "state",
+                "data":     state,
+                "sim_mode": get_simulation_mode(),
+            }))
     except Exception:
         pass   # WebSocket not ready yet or no clients — silently skip
 
