@@ -12,3 +12,4 @@ websockets
 sqlalchemy
 aiosqlite
 paho-mqtt
+
