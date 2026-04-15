@@ -8,13 +8,14 @@ const modes = [
 
 const views = [
   { id: 'chat',      label: 'Chat',      icon: '◈' },
-  { id: 'workflows', label: 'Flows',     icon: '⬡' },
+  { id: 'devices',   label: 'Devices',   icon: '⬡' },
+  { id: 'workflows', label: 'Flows',     icon: '◷' },
   { id: 'templates', label: 'Templates', icon: '◎' },
   { id: 'dashboard', label: 'Dashboard', icon: '◩' },
   { id: 'settings',  label: 'Settings',  icon: '⚙' },
 ]
 
-export default function Sidebar({ mode, setMode, view, setView, onClear, user, onLogout }) {
+export default function Sidebar({ mode, setMode, view, setView, onClear, user, onLogout, simMode }) {
   return (
     <aside className="w-60 h-screen flex flex-col bg-claw-surface border-r border-claw-border shrink-0">
 
@@ -26,7 +27,12 @@ export default function Sidebar({ mode, setMode, view, setView, onClear, user, o
           </div>
           <span className="font-display text-lg text-claw-text tracking-tight">OpenClaw</span>
         </div>
-        <p className="text-claw-sub text-xs mt-1 font-body">AI Automation Platform</p>
+        <div className="flex items-center gap-1.5 mt-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full ${simMode ? 'bg-claw-amber' : 'bg-claw-accent animate-pulse'}`} />
+          <p className="text-claw-sub text-xs font-body">
+            {simMode ? 'Simulation mode' : 'Hardware connected'}
+          </p>
+        </div>
       </div>
 
       {/* Views — 3 col grid now that there are 5 */}
