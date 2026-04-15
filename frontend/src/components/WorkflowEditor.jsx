@@ -305,6 +305,8 @@ export default function WorkflowEditor({ initial, onSaved, onCancel }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [runMsg, setRunMsg] = useState(null)
 
   function setField(key, val) { setWf(prev => ({ ...prev, [key]: val })) }
 
@@ -344,6 +346,20 @@ export default function WorkflowEditor({ initial, onSaved, onCancel }) {
     setField('actions', arr)
   }
 
+  async function runNow() {
+    if (!initial?.id) { setError('Save the workflow first before running'); return }
+    setRunning(true); setRunMsg(null)
+    try {
+      await api.runWorkflow(initial.id)
+      setRunMsg('✓ Triggered — check the dashboard')
+      setTimeout(() => setRunMsg(null), 3000)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRunning(false)
+    }
+  }
+
   async function save() {
     if (!wf.name.trim()) { setError('Give your workflow a name first'); return }
     setSaving(true); setError(null)
@@ -375,6 +391,17 @@ export default function WorkflowEditor({ initial, onSaved, onCancel }) {
           </div>
           <div className="flex items-center gap-2">
             {error && <span className="text-red-400 text-xs font-body">{error}</span>}
+          {runMsg && <span className="text-claw-accent text-xs font-body">{runMsg}</span>}
+          {initial?.id && (
+            <button
+              onClick={runNow}
+              disabled={running}
+              className="px-4 py-2 rounded-xl text-sm font-body font-medium transition-all
+                bg-claw-muted border border-claw-border text-claw-sub hover:text-claw-text
+                disabled:opacity-50">
+              {running ? '…' : '▷ Run'}
+            </button>
+          )}
             <button
               onClick={save}
               disabled={saving || saved}

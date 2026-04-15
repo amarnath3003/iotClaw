@@ -1,176 +1,162 @@
-# IoT Claw - AI Automation Platform
+# OpenClaw v5 — Complete Setup & Run Guide
 
-An AI-assisted no-code automation platform for IoT and robotics workflows.
+## What changed in v5
 
-This repository combines:
-- A FastAPI backend for chat, workflow storage, and simulation state
-- A React frontend for chat-driven automation, workflow editing, and dashboard monitoring
-- A simulation engine that mimics sensors/devices so workflows can be tested without hardware
+| Area | Before (v4) | After (v5) |
+|------|-------------|------------|
+| AI model | Anthropic Claude | Gemini 2.0 Flash |
+| Device actions | Execution engine only | Gemini function calling (MCP tools) |
+| Auth | None | JWT sessions (register / login) |
+| Workflows | No ownership | Tied to your user account |
+| OpenClaw adapter | Present | Removed |
 
-## Project Idea
+---
 
-The core concept is:
+## Project structure
 
-Talk -> Workflow -> Execution
+```
+openclaw/
+├── .env                           ← Your keys (never commit this)
+├── backend/
+│   ├── main.py                    ← FastAPI server, all routes
+│   ├── requirements.txt
+│   ├── core/
+│   │   ├── auth.py                ← JWT auth, user CRUD
+│   │   ├── mcp_tools.py           ← IoT tools Gemini can call
+│   │   └── execution_engine.py   ← Scheduled workflow runner
+│   └── simulation/
+│       └── engine.py              ← Virtual sensors + devices
+└── frontend/
+    └── src/
+        ├── App.jsx                ← Root — auth gate + routing
+        ├── api.js                 ← All backend calls (with auth header)
+        └── components/
+            ├── AuthScreens.jsx    ← Login + Register
+            ├── Sidebar.jsx        ← Nav + user + sign out
+            ├── Chat.jsx           ← Gemini agent chat
+            ├── Dashboard.jsx      ← Live sensor/device view
+            ├── WorkflowList.jsx   ← Saved automations
+            ├── WorkflowEditor.jsx ← Visual builder
+            └── TemplateLibrary.jsx← 15 ready-made automations
+```
 
-Users describe what they want in natural language. The AI assistant converts that into a structured workflow (trigger, conditions, actions). The backend stores and executes the workflow against simulated devices (and later real devices through adapters).
+---
 
-The product vision supports three experience levels:
-- Consumer mode: plain-language automation chat
-- Maker mode: visual workflow building/editing
-- Power User mode: schema-focused JSON workflow output
+## Step 1 — Prerequisites
 
-## How It Works
+- Python 3.10+ — https://python.org/downloads
+- Node.js 18+ — https://nodejs.org
 
-### 1. Chat to Workflow
-- Frontend sends conversation context and active mode to POST /chat
-- Backend uses Gemini with mode-specific system prompts
-- If the AI reply includes a workflow JSON block, frontend can save it as a workflow
+---
 
-### 2. Workflow Management
-- Workflows are stored in SQLite (backend/openclaw.db)
-- CRUD endpoints allow create, update, toggle, list, and delete
-- Each update increments the workflow version
-- Audit records are stored for key workflow events
+## Step 2 — Get a Gemini API key
 
-### 3. Simulation and State
-- A background simulation loop updates virtual sensors every 2 seconds
-- Simulated device and sensor states are exposed via /state
-- Dashboard polls:
-  - /state (live state)
-  - /execlog (execution history)
-  - /notifications (user-facing alerts)
+Go to https://aistudio.google.com/app/apikey and create a key.
 
-### 4. Execution Engine (Current Snapshot)
-- Execution engine module exists with support for:
-  - mqtt_event / time triggers
-  - time / numeric / state conditions
-  - device_control / delay / notify / robot_move actions
-  - error policy with retries
-- In the current backend startup path, execution start is wired through a backward-compatible entry point.
-- The architecture is ready for a fuller event-bus-driven runtime integration.
+---
 
-## Current Features in This Repo
-
-- Multi-mode chat UI (Consumer, Maker, Power User)
-- AI-generated workflow detection and save flow
-- Workflow list, edit, enable/disable, delete
-- Real-time simulation dashboard with sensor/device states
-- Backend workflow persistence and audit endpoint
-
-## Tech Stack
-
-- Backend: FastAPI, Pydantic, SQLite
-- AI: Google Generative AI (Gemini)
-- Frontend: React + Vite + Tailwind CSS
-- Simulation: Python background simulation services
-
-## Repository Layout
-
-- backend/: FastAPI app, workflow/data logic, execution/simulation modules
-- frontend/: React app (chat, workflow UI, dashboard)
-- config/: shared settings module
-- open_claw_ai_automation_platform_master_context.md: product architecture context
-- open_claw_ai_automation_platform_v2.md: upgraded architecture and roadmap context
-
-## Local Setup
-
-### Prerequisites
-- Python 3.10+
-- Node.js 18+
-
-### 1. Backend Setup
-
-From the backend folder:
+## Step 3 — Install backend
 
 ```bash
+cd openclaw/backend
+python -m venv venv
+venv\Scripts\activate        # Windows CMD
 pip install -r requirements.txt
 ```
 
-Create backend/.env with:
+---
+
+## Step 4 — Configure .env
 
 ```env
-GEMINI_API_KEY=your_api_key_here
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-2.0-flash
+SECRET_KEY=any-long-random-string
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
 ```
 
-Run backend:
+---
+
+## Step 5 — Start backend
 
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --port 8000
 ```
 
-Backend URL:
-- http://localhost:8000
+Test: http://localhost:8000 should return `{"status":"OpenClaw v5 running"}`
 
-### 2. Frontend Setup
+---
 
-From the frontend folder:
+## Step 6 — Start frontend
 
 ```bash
+cd openclaw/frontend
 npm install
 npm run dev
 ```
 
-Frontend URL:
-- http://localhost:5173
+Open http://localhost:5173
 
-## Main API Endpoints
+---
 
-- GET /: service status
-- POST /chat: AI assistant response (+ optional workflow JSON)
-- GET /workflows: list workflows
-- POST /workflows: create workflow
-- GET /workflows/{id}: get one workflow
-- PUT /workflows/{id}: update workflow
-- PATCH /workflows/{id}/toggle: enable/disable workflow
-- DELETE /workflows/{id}: delete workflow
-- GET /state: simulation state snapshot
-- POST /state/{device_path}: manual device control in simulation
-- GET /execlog: execution log
-- GET /notifications: simulation notifications
-- GET /audit: workflow audit records
+## Step 7 — Create account and start
 
-## Example Workflow Shape
+Register with any username + email + password (min 6 chars). You're in.
 
-```json
-{
-  "name": "Night Lighting",
-  "description": "Turn on bedroom light when motion is detected at night",
-  "enabled": true,
-  "trigger": {
-    "type": "mqtt_event",
-    "topic": "sensor/motion",
-    "condition": "payload == 'detected'"
-  },
-  "conditions": [
-    {
-      "type": "time",
-      "after": "22:00",
-      "before": "06:00"
-    }
-  ],
-  "actions": [
-    { "type": "device_control", "device": "light", "command": "on" },
-    { "type": "delay", "seconds": 300 },
-    { "type": "device_control", "device": "light", "command": "off" }
-  ],
-  "error_policy": {
-    "retry_count": 2,
-    "on_failure": "notify_user"
-  }
-}
-```
+---
 
-## Roadmap Direction
+## How Gemini function calling works
 
-Planned architecture in the context docs includes:
-- API gateway + JWT auth
-- MQTT-first event bus integration
-- OpenClaw adapter for real skill execution
-- Template library onboarding
-- Stronger error handling and audit surfaces
+Say "turn on the fan and check the temperature":
 
-## License
+1. Gemini decides to call `control_device("fan","on")` and `read_sensor("temperature")`
+2. Backend executes those functions — updates simulation + real hardware if connected
+3. Results returned to Gemini
+4. Gemini replies with actual values: "Fan is on. Temperature is 27.3C."
 
-See LICENSE for project licensing details.
+The AI acts, not just talks.
+
+---
+
+## Three chat modes
+
+| Mode | Gemini behavior |
+|------|----------------|
+| Consumer | Plain friendly language, no jargon |
+| Maker | Explains logic, generates workflow JSON |
+| Power User | Technical, shows tool calls + JSON |
+
+---
+
+## Troubleshooting
+
+**ModuleNotFoundError** → venv not activated or pip install not run
+
+**Gemini API 400 error** → Check GEMINI_API_KEY in .env
+
+**Dashboard shows no data** → Backend crashed — check terminal
+
+**"Session expired"** → SECRET_KEY changed — log out and back in
+
+**npm errors** → Run npm install in frontend/
+
+---
+
+## API quick reference
+
+| Method | Path | Auth | What it does |
+|--------|------|------|-------------|
+| POST | /auth/register | No | Create account |
+| POST | /auth/login | No | Get JWT token |
+| GET | /auth/me | Yes | Current user info |
+| POST | /chat | Optional | Chat with Gemini |
+| GET | /workflows | Optional | List workflows |
+| POST | /workflows | Optional | Save workflow |
+| PATCH | /workflows/{id}/toggle | No | Enable/disable |
+| POST | /workflows/{id}/run | No | Run now |
+| GET | /templates | No | 15 templates |
+| POST | /templates/{id}/activate | Optional | Copy to workflows |
+| GET | /state | No | Live sensor/device state |
+| POST | /state/{device} | No | Control device |
+| GET | /execlog | No | Execution history |
+| GET | /notifications | No | Notifications |

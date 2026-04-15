@@ -109,6 +109,18 @@ def _simulate():
 
 _running = False
 
+def _try_broadcast():
+    """Non-blocking attempt to push state over WebSocket after each tick."""
+    try:
+        import asyncio, importlib
+        main_mod = importlib.import_module("main")
+        manager  = getattr(main_mod, "ws_manager", None)
+        if manager and manager._conns:
+            state = get_state()
+            asyncio.run(manager.broadcast({"type": "state", "data": state}))
+    except Exception:
+        pass   # WebSocket not ready yet or no clients — silently skip
+
 def start():
     global _running
     if _running:
@@ -117,6 +129,7 @@ def start():
     def loop():
         while _running:
             _simulate()
+            _try_broadcast()
             time.sleep(2)
     threading.Thread(target=loop, daemon=True).start()
 

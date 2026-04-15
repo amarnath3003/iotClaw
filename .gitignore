@@ -1,4 +1,46 @@
-# Environment variables
+# Secrets and environment
 .env
 .env.*
-backend/.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Local databases and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+backend/openclaw.db
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Build artifacts
+build/
+dist/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

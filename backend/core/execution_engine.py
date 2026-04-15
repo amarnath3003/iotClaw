@@ -1,226 +1,197 @@
-import json
-import time
-import logging
-import threading
-import sqlite3
+"""
+Execution engine v2
+- MQTT event triggers (sensor-based)
+- Time / cron triggers (checked every 30s)
+- run_skill action type
+- Per-workflow last_fired throttle (prevents re-firing within 10s)
+- Thread-safe, daemon threads
+"""
+import threading, time, json, logging
 from datetime import datetime
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_running      = False
+_conn_factory = None
+_last_fired   = {}   # wf_id → timestamp, prevents rapid re-firing
+THROTTLE_SECS = 10
 
-_legacy_started = False
+def _get_workflows():
+    conn = _conn_factory()
+    rows = conn.execute("SELECT * FROM workflows WHERE enabled=1").fetchall()
+    conn.close()
+    return rows
 
+def _check_trigger(trigger, event):
+    t = trigger.get("type", "manual")
+    if t != "mqtt_event":
+        return False
+    if trigger.get("topic", "") != event.get("topic", ""):
+        return False
+    cond    = trigger.get("condition", "")
+    payload = event.get("payload", "")
+    if not cond:
+        return True
+    try:
+        return bool(eval(cond,
+            {"__builtins__": {"float": float, "int": int, "str": str, "bool": bool}},
+            {"payload": payload}))
+    except Exception:
+        return payload == cond
 
-class ExecutionEngine:
-    def __init__(self, db_path, sim_engine, mqtt_broker, state_manager):
-        self._db_path = db_path
-        self._sim = sim_engine
-        self._mqtt = mqtt_broker
-        self._state = state_manager
-        self._running = False
-        self._time_thread = None
-        self._active = {}
+def _check_time_trigger(trigger):
+    t = trigger.get("type")
+    if t != "time":
+        return False
+    cron = trigger.get("cron", "")
+    if not cron:
+        return False
+    now = datetime.now()
+    try:
+        parts = cron.strip().split()
+        if len(parts) >= 5:
+            m_spec, h_spec = parts[0], parts[1]
+            m_ok = (m_spec == "*" or m_spec.startswith("*/") and now.minute % int(m_spec[2:]) == 0
+                    or m_spec.isdigit() and int(m_spec) == now.minute)
+            h_ok = (h_spec == "*" or h_spec.startswith("*/") and now.hour % int(h_spec[2:]) == 0
+                    or h_spec.isdigit() and int(h_spec) == now.hour)
+            return m_ok and h_ok and now.second < 30
+        if ":" in cron:
+            h, m = map(int, cron.split(":"))
+            return now.hour == h and now.minute == m and now.second < 30
+    except Exception:
+        pass
+    return False
 
-    def start(self):
-        self._running = True
-        self._mqtt.subscribe("#", self._on_mqtt_event)
-        self._time_thread = threading.Thread(target=self._time_loop, daemon=True)
-        self._time_thread.start()
-        logger.info("[ENG] Execution engine started")
-
-    def stop(self):
-        self._running = False
-
-    def _on_mqtt_event(self, topic, payload):
-        for wf in self._load_enabled():
-            t = wf.get("trigger", {})
-            if t.get("type") != "mqtt_event":
-                continue
-            if not self._topic_matches(t.get("topic", ""), topic):
-                continue
-            cond = t.get("condition", "")
-            if cond and not self._eval_trigger_cond(cond, payload):
-                continue
-            logger.info(f"[ENG] MQTT trigger: {wf['name']} on {topic}")
-            self._run_async(wf, {"topic": topic, "payload": payload})
-
-    def _time_loop(self):
-        while self._running:
-            now = datetime.now()
-            for wf in self._load_enabled():
-                t = wf.get("trigger", {})
-                if t.get("type") == "time" and self._cron_matches(t.get("cron",""), now):
-                    logger.info(f"[ENG] Time trigger: {wf['name']}")
-                    self._run_async(wf, {"time": now.isoformat()})
-            time.sleep(30)
-
-    def _run_async(self, wf, ctx):
-        wid = wf["id"]
-        if wid in self._active and self._active[wid].is_alive():
-            return
-        t = threading.Thread(target=self._run, args=(wf, ctx), daemon=True)
-        self._active[wid] = t
-        t.start()
-
-    def _run(self, wf, ctx):
-        wid, name = wf["id"], wf["name"]
-        self._audit(wid, "execution_started", ctx)
-        for cond in wf.get("conditions", []):
-            if not self._check_condition(cond):
-                logger.info(f"[ENG] Condition failed: {name}")
-                self._audit(wid, "condition_failed", cond)
-                return
-        ep = wf.get("error_policy", {})
-        retries = ep.get("retry_count", 2)
-        for i, action in enumerate(wf.get("actions", [])):
-            ok = False
-            for attempt in range(retries + 1):
-                try:
-                    self._run_action(action, wid)
-                    ok = True
-                    break
-                except Exception as e:
-                    logger.warning(f"[ENG] Action {i} attempt {attempt+1}: {e}")
-                    if attempt < retries:
-                        time.sleep(ep.get("retry_backoff_seconds", 3))
-            if not ok:
-                on_fail = ep.get("on_failure", "notify_user")
-                self._audit(wid, "action_failed", {"action": action})
-                if on_fail == "pause":
-                    self._set_enabled(wid, False)
-                return
-        self._audit(wid, "execution_completed", {"actions": len(wf.get("actions", []))})
-        logger.info(f"[ENG] Completed: {name}")
-
-    def _run_action(self, action, wid):
-        atype = action.get("type")
-        if atype == "device_control":
-            dev_id = action.get("device", "")
-            cmd = action.get("command", "on")
-            dev = self._sim.get_device(dev_id)
-            if not dev:
-                raise ValueError(f"Device not found: {dev_id}")
-            if cmd in ("on", "toggle"):
-                params = action.get("params") or {}
-                dev.on(**{k: v for k, v in params.items() if k in ("brightness", "speed")})
-            elif cmd == "off":
-                dev.off()
-            self._audit(wid, "action_device", {"device": dev_id, "cmd": cmd})
-        elif atype == "delay":
-            secs = int(action.get("seconds", 1))
-            logger.info(f"[ENG] Waiting {secs}s")
-            time.sleep(secs)
-        elif atype == "notify":
-            msg = action.get("message", "OpenClaw alert")
-            logger.info(f"[NOTIFY] {msg}")
-            self._audit(wid, "action_notify", {"message": msg})
-        elif atype == "robot_move":
-            dev_id = action.get("device", "robot_1")
-            cmd = action.get("command", "forward")
-            dev = self._sim.get_device(dev_id)
-            if not dev:
-                raise ValueError(f"Robot not found: {dev_id}")
-            if cmd == "stop":
-                dev.stop()
-            else:
-                dev.move(cmd)
-                dur = (action.get("params") or {}).get("duration", 1000)
-                time.sleep(dur / 1000)
-                dev.stop()
-            self._audit(wid, "action_robot", {"device": dev_id, "cmd": cmd})
-
-    def _check_condition(self, cond):
+def _check_conditions(conditions, state):
+    for cond in conditions:
         ctype = cond.get("type")
         if ctype == "time":
-            now = datetime.now().strftime("%H:%M")
-            after, before = cond.get("after","00:00"), cond.get("before","23:59")
-            if after <= before:
-                return after <= now <= before
-            return now >= after or now <= before
+            now   = datetime.now().strftime("%H:%M")
+            after = cond.get("after", "00:00")
+            before = cond.get("before", "23:59")
+            in_w  = (after <= now <= before) if after <= before else (now >= after or now <= before)
+            if not in_w:
+                return False
         elif ctype == "numeric":
-            field = cond.get("field","").replace("/",".")
-            op = cond.get("operator","gt")
-            thr = float(cond.get("value", 0))
-            val = self._state.get(field)
-            if val is None: return False
-            val = float(val)
-            return {"gt": val>thr,"lt": val<thr,"gte": val>=thr,"lte": val<=thr,"eq": val==thr}.get(op, False)
+            field  = cond.get("field", "")
+            op     = cond.get("operator", "gt")
+            thr    = float(cond.get("value", 0))
+            actual = state.get(f"sensor/{field}", {}).get("value", 0)
+            try:
+                actual = float(actual)
+            except Exception:
+                return False
+            if not {"gt": actual > thr, "lt": actual < thr,
+                    "gte": actual >= thr, "lte": actual <= thr,
+                    "eq": actual == thr}.get(op, False):
+                return False
         elif ctype == "state":
-            field = cond.get("field","").replace("/",".")
-            return str(self._state.get(field,"")) == str(cond.get("value",""))
-        return True
+            field  = cond.get("field", "")
+            val    = str(cond.get("value", ""))
+            actual = str(state.get(f"device/{field}", {}).get("value", ""))
+            if actual != val:
+                return False
+    return True
 
-    def _topic_matches(self, pattern, topic):
-        try:
-            import paho.mqtt.client as mqtt
-            return mqtt.topic_matches_sub(pattern, topic)
-        except Exception:
-            return pattern == topic
-
-    def _eval_trigger_cond(self, expr, payload):
-        try:
-            env = {"payload": str(payload.get("detected") or payload.get("value") or ""), **payload}
-            return bool(eval(expr, {"__builtins__": {}}, env))
-        except Exception:
-            return True
-
-    def _cron_matches(self, cron, now):
-        try:
-            parts = cron.strip().split()
-            if len(parts) == 5:
-                return now.minute == int(parts[0]) and now.hour == int(parts[1]) and now.second < 30
-            if ":" in cron:
-                h, m = map(int, cron.split(":"))
-                return now.hour == h and now.minute == m and now.second < 30
-        except Exception:
-            pass
+def _throttle_ok(wid):
+    last = _last_fired.get(wid, 0)
+    if time.time() - last < THROTTLE_SECS:
         return False
+    _last_fired[wid] = time.time()
+    return True
 
-    def _load_enabled(self):
+def _execute_actions(actions, workflow_name):
+    from simulation import engine as sim
+    from core.mcp_tools import (control_device, move_robot,
+                                 send_notification, run_skill)
+    for action in actions:
+        atype = action.get("type")
         try:
-            conn = sqlite3.connect(self._db_path)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM workflows WHERE enabled=1").fetchall()
-            conn.close()
-            return [{
-                "id": r["id"], "name": r["name"],
-                "trigger": json.loads(r["trigger_json"]),
-                "conditions": json.loads(r["conditions_json"]),
-                "actions": json.loads(r["actions_json"]),
-                "error_policy": json.loads(r["error_policy_json"]),
-            } for r in rows]
+            if atype == "device_control":
+                control_device(
+                    device_id=action.get("device", ""),
+                    command=action.get("command", "on"),
+                    params=action.get("params"),
+                )
+            elif atype == "robot_move":
+                move_robot(
+                    command=action.get("command", "stop"),
+                    params=action.get("params"),
+                )
+            elif atype == "run_skill":
+                run_skill(
+                    skill_name=action.get("skill", ""),
+                    params=action.get("params"),
+                )
+            elif atype == "delay":
+                secs = min(int(action.get("seconds", 1)), 60)
+                time.sleep(secs)
+                sim.push_exec_log(workflow_name, f"delay {secs}s", "ok")
+            elif atype == "notify":
+                send_notification(action.get("message", "Automation triggered"))
         except Exception as e:
-            logger.error(f"[ENG] Load failed: {e}")
-            return []
+            logger.error(f"[ENG] {workflow_name} · {atype}: {e}")
+            from simulation import engine as sim2
+            sim2.push_exec_log(workflow_name, atype, "error", str(e))
 
-    def _set_enabled(self, wid, enabled):
-        conn = sqlite3.connect(self._db_path)
-        conn.execute("UPDATE workflows SET enabled=? WHERE id=?", (int(enabled), wid))
-        conn.commit()
-        conn.close()
-
-    def _audit(self, wid, event, detail):
-        try:
-            conn = sqlite3.connect(self._db_path)
-            conn.execute("INSERT INTO audit_log (workflow_id, event, detail) VALUES (?,?,?)",
-                         (wid, event, json.dumps(detail)))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.error(f"[ENG] Audit failed: {e}")
-
-
-def start(get_conn=None):
-    """Backward-compatible entrypoint expected by backend/main.py."""
-    global _legacy_started
-    if _legacy_started:
+def _fire(row):
+    wid  = row["id"]
+    name = row["name"]
+    if not _throttle_ok(wid):
         return
-    _legacy_started = True
-    logger.info("[ENG] Legacy execution engine start() initialized")
+    try:
+        actions = json.loads(row["actions_json"])
+        logger.info(f"[ENG] Firing: {name}")
+        t = threading.Thread(target=_execute_actions, args=(actions, name), daemon=True)
+        t.start()
+    except Exception as e:
+        logger.error(f"[ENG] fire error {name}: {e}")
 
+def start(conn_factory):
+    global _running, _conn_factory
+    _conn_factory = conn_factory
+    if _running:
+        return
+    _running = True
+
+    # Event-driven thread (drains queue every second)
+    def event_loop():
+        from simulation import engine as sim
+        while _running:
+            try:
+                events = sim.drain_events()
+                if events:
+                    rows  = _get_workflows()
+                    state = sim.get_state()
+                    for event in events:
+                        for row in rows:
+                            trigger    = json.loads(row["trigger_json"])
+                            conditions = json.loads(row["conditions_json"])
+                            if (_check_trigger(trigger, event) and
+                                    _check_conditions(conditions, state)):
+                                _fire(row)
+            except Exception as e:
+                logger.error(f"[ENG] event_loop: {e}")
+            time.sleep(1)
+
+    # Time-trigger thread (checks every 30s)
+    def time_loop():
+        while _running:
+            try:
+                rows = _get_workflows()
+                for row in rows:
+                    trigger = json.loads(row["trigger_json"])
+                    if _check_time_trigger(trigger):
+                        _fire(row)
+            except Exception as e:
+                logger.error(f"[ENG] time_loop: {e}")
+            time.sleep(30)
+
+    threading.Thread(target=event_loop, daemon=True).start()
+    threading.Thread(target=time_loop,  daemon=True).start()
+    logger.info("[ENG] Execution engine v2 started (event + time loops)")
 
 def stop():
-    """Backward-compatible stop entrypoint."""
-    global _legacy_started
-    _legacy_started = False
+    global _running
+    _running = False
