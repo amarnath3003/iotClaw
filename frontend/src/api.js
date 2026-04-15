@@ -81,4 +81,22 @@ export const api = {
   getSettings:      ()           => req('GET',  '/settings', null, true),
   changePassword:   (old_pw, new_pw) =>
                       req('PUT', '/settings/password', { old_password: old_pw, new_password: new_pw }, true),
+
+  // Devices & rooms
+  listDevices:        ()            => req('GET',  '/devices'),
+  addDevice:          (d)           => req('POST', '/devices', d, true),
+  updateDevice:       (id, d)       => req('PUT',  `/devices/${id}`, d, true),
+  deleteDevice:       (id)          => req('DELETE', `/devices/${id}`, null, true),
+  testDevice:         (id, d)       => req('POST', `/devices/${id}/test`, d, true),
+  listRooms:          ()            => req('GET',  '/rooms'),
+  addRoom:            (d)           => req('POST', '/rooms', d, true),
+
+  // System
+  getStatus:          ()            => req('GET',  '/status'),
+
+  // Persistent log
+  getExecLogHistory:  (limit = 100) => req('GET',  `/execlog/history?limit=${limit}`),
+
+  // Onboarding
+  completeOnboarding: ()            => req('POST', '/auth/onboarding-done', null, true),
 }
