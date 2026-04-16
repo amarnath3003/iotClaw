@@ -420,6 +420,30 @@ def create_workflow(body: WorkflowSave,
     conn.close()
     return row_to_wf(row)
 
+# NOTE: Keep this route before any dynamic /workflows/{wid} routes.
+# FastAPI matches routes in declaration order for overlapping patterns.
+@app.post("/workflows/import")
+def import_workflow(body: dict,
+                    current_user: Optional[dict] = Depends(get_current_user_optional)):
+    """Accept a workflow JSON (exported or hand-crafted) and save it."""
+    name = body.get("name", "Imported workflow")
+    wid  = str(uuid.uuid4())
+    uid  = current_user["id"] if current_user else ""
+    conn = get_conn()
+    conn.execute("""INSERT INTO workflows
+        (id,name,description,enabled,user_id,trigger_json,conditions_json,actions_json,error_policy_json)
+        VALUES (?,?,?,?,?,?,?,?,?)""",
+        (wid, name, body.get("description", ""), 1, uid,
+         json.dumps(body.get("trigger", {"type": "manual"})),
+         json.dumps(body.get("conditions", [])),
+         json.dumps(body.get("actions", [])),
+         json.dumps(body.get("error_policy", {"retry_count": 2, "on_failure": "notify_user"}))))
+    audit(conn, wid, "imported", name)
+    conn.commit()
+    row = conn.execute("SELECT * FROM workflows WHERE id=?", (wid,)).fetchone()
+    conn.close()
+    return row_to_wf(row)
+
 @app.get("/workflows/{wid}")
 def get_workflow(wid: str):
     conn = get_conn()
@@ -704,28 +728,6 @@ def export_workflow(wid: str):
     for k in ("id", "user_id", "created_at", "updated_at", "version"):
         wf.pop(k, None)
     return wf
-
-@app.post("/workflows/import")
-def import_workflow(body: dict,
-                    current_user: Optional[dict] = Depends(get_current_user_optional)):
-    """Accept a workflow JSON (exported or hand-crafted) and save it."""
-    name = body.get("name", "Imported workflow")
-    wid  = str(uuid.uuid4())
-    uid  = current_user["id"] if current_user else ""
-    conn = get_conn()
-    conn.execute("""INSERT INTO workflows
-        (id,name,description,enabled,user_id,trigger_json,conditions_json,actions_json,error_policy_json)
-        VALUES (?,?,?,?,?,?,?,?,?)""",
-        (wid, name, body.get("description", ""), 1, uid,
-         json.dumps(body.get("trigger", {"type": "manual"})),
-         json.dumps(body.get("conditions", [])),
-         json.dumps(body.get("actions", [])),
-         json.dumps(body.get("error_policy", {"retry_count": 2, "on_failure": "notify_user"}))))
-    audit(conn, wid, "imported", name)
-    conn.commit()
-    row = conn.execute("SELECT * FROM workflows WHERE id=?", (wid,)).fetchone()
-    conn.close()
-    return row_to_wf(row)
 
 # ── Settings / user preferences ───────────────────────────────────────────────
 @app.get("/settings")
