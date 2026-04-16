@@ -64,6 +64,10 @@ def _check_rate_limit(key: str):
     now = _time.time()
     hits = [t for t in _auth_hits[key] if now - t < AUTH_WINDOW]
     _auth_hits[key] = hits
+    if len(_auth_hits) > 1000:
+        stale_keys = [k for k, v in _auth_hits.items() if not v]
+        for k in stale_keys:
+            _auth_hits.pop(k, None)
     if len(hits) >= AUTH_LIMIT:
         raise HTTPException(429, "Too many attempts — wait 60 seconds")
     _auth_hits[key].append(now)

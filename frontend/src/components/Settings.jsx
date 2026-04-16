@@ -59,9 +59,7 @@ export default function Settings({ user, onLogout }) {
 
   useEffect(() => {
     const settingsRequest = AUTH_ENABLED
-      ? (api.getSettings ? api.getSettings() : fetch('http://localhost:8000/settings', {
-          headers: { Authorization: `Bearer ${localStorage.getItem('openclaw_token')}` }
-        }).then(r => r.json()))
+      ? api.getSettings()
       : Promise.resolve({ model: 'gemini-2.0-flash', version: '5.0', sim_active: true })
 
     Promise.all([
@@ -82,17 +80,7 @@ export default function Settings({ user, onLogout }) {
     if (!oldPw || !newPw) { setPwMsg({ ok: false, text: 'Fill in both fields' }); return }
     setPwSaving(true); setPwMsg(null)
     try {
-      await fetch('http://localhost:8000/settings/password', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('openclaw_token')}`,
-        },
-        body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
-      }).then(async r => {
-        if (!r.ok) { const e = await r.json(); throw new Error(e.detail) }
-        return r.json()
-      })
+      await api.changePassword(oldPw, newPw)
       setPwMsg({ ok: true, text: 'Password updated' })
       setOldPw(''); setNewPw('')
     } catch (err) {
