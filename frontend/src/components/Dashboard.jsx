@@ -139,7 +139,7 @@ export default function Dashboard() {
   const restPoll = useCallback(async () => {
     try {
       const [s, l, n] = await Promise.all([api.getState(), api.getExecLog(), api.getNotifications()])
-      setState(s); setExecLog(l); setNotifs(n)
+      setState(s?.devices ?? s); setExecLog(l); setNotifs(n)
       setLastRefresh(new Date().toLocaleTimeString())
       setLoading(false)
     } catch { setLoading(false) }
@@ -171,7 +171,7 @@ export default function Dashboard() {
           try {
             const msg = JSON.parse(e.data)
             if (msg.type === 'state') {
-              setState(msg.data)
+              setState(msg.data?.devices ?? msg.data)
               setLastRefresh(new Date().toLocaleTimeString())
               setLoading(false)
             }
