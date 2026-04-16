@@ -42,9 +42,41 @@ def control_device(device_id: str, command: str, params: dict = None) -> dict:
     params:    optional e.g. {"brightness": 80} for lights, {"speed": 3} for fans
     """
     from simulation import engine as sim
+    from core import mqtt_bridge
+    from core.device_registry import get_device, get_devices_for_user
+
     params = params or {}
-    result, source = _hw("POST", f"/devices/{device_id}/control",
-                          {"command": command, "params": params})
+
+    # Prefer registered MQTT set-topic for real hardware commands.
+    result = None
+    source = "simulation"
+    device = get_device(device_id)
+    if not device:
+        # Fallback for natural IDs like "light" when DB IDs are UUIDs.
+        did = device_id.strip().lower()
+        for d in get_devices_for_user(""):
+            if str(d.get("device_type", "")).strip().lower() == did:
+                device = d
+                break
+            if str(d.get("name", "")).strip().lower() == did:
+                device = d
+                break
+
+    topic_set = device.get("mqtt_topic_set", "") if device else ""
+    if topic_set:
+        payload = "ON" if command == "on" else ("OFF" if command == "off" else str(command).upper())
+        sent = mqtt_bridge.publish(topic_set, payload)
+        if sent:
+            source = "hardware"
+            result = {"topic": topic_set, "payload": payload, "via": "mqtt"}
+
+    if result is None:
+        result, source = _hw(
+            "POST",
+            f"/devices/{device_id}/control",
+            {"command": command, "params": params},
+        )
+
     topic = f"device/{device_id}"
     value = True if command == "on" else (False if command == "off" else command)
     sim.set_device(topic, value)
