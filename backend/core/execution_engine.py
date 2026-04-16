@@ -51,10 +51,27 @@ def _check_time_trigger(trigger):
         parts = cron.strip().split()
         if len(parts) >= 5:
             m_spec, h_spec = parts[0], parts[1]
-            m_ok = (m_spec == "*" or m_spec.startswith("*/") and now.minute % int(m_spec[2:]) == 0
-                    or m_spec.isdigit() and int(m_spec) == now.minute)
-            h_ok = (h_spec == "*" or h_spec.startswith("*/") and now.hour % int(h_spec[2:]) == 0
-                    or h_spec.isdigit() and int(h_spec) == now.hour)
+
+            if m_spec == "*":
+                m_ok = True
+            elif m_spec.startswith("*/"):
+                step = int(m_spec[2:])
+                m_ok = step > 0 and (now.minute % step == 0)
+            elif m_spec.isdigit():
+                m_ok = int(m_spec) == now.minute
+            else:
+                m_ok = False
+
+            if h_spec == "*":
+                h_ok = True
+            elif h_spec.startswith("*/"):
+                step = int(h_spec[2:])
+                h_ok = step > 0 and (now.hour % step == 0)
+            elif h_spec.isdigit():
+                h_ok = int(h_spec) == now.hour
+            else:
+                h_ok = False
+
             return m_ok and h_ok and now.second < 30
         if ":" in cron:
             h, m = map(int, cron.split(":"))
