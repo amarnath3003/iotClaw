@@ -48,7 +48,13 @@ def control_device(device_id: str, command: str, params: dict = None) -> dict:
     topic = f"device/{device_id}"
     value = True if command == "on" else (False if command == "off" else command)
     sim.set_device(topic, value)
-    sim.push_exec_log("gemini", f"{device_id} → {command}", "ok", source)
+    sim.push_exec_log(
+        "gemini",
+        f"{device_id} → {command}",
+        "ok",
+        detail=source,
+        source=source,
+    )
     if result:
         return {"ok": True, "device": device_id, "command": command,
                 "source": source, "result": result}
@@ -89,7 +95,13 @@ def move_robot(command: str, params: dict = None) -> dict:
     result, source = _hw("POST", "/robots/robot_1/move",
                           {"command": command, "params": params})
     sim.set_device("device/robot", command)
-    sim.push_exec_log("gemini", f"robot → {command}", "ok", source)
+    sim.push_exec_log(
+        "gemini",
+        f"robot → {command}",
+        "ok",
+        detail=source,
+        source=source,
+    )
     if result:
         return {"ok": True, "command": command, "source": source, "result": result}
     return {"ok": True, "command": command, "source": "simulation"}
@@ -145,7 +157,13 @@ def run_skill(skill_name: str, params: dict = None) -> dict:
     from simulation import engine as sim
     params = params or {}
     result, source = _hw("POST", f"/skills/{skill_name}/run", {"params": params})
-    sim.push_exec_log("gemini", f"skill/{skill_name}", "ok", str(params))
+    sim.push_exec_log(
+        "gemini",
+        f"skill/{skill_name}",
+        "ok",
+        detail=source,
+        source=source,
+    )
     if result:
         return {"ok": True, "skill": skill_name, "source": source, "result": result}
     if skill_name in BUILTIN_SKILLS:

@@ -71,7 +71,7 @@ def drain_events():
         event_queue.clear()
         return evts
 
-def push_exec_log(workflow_name, action, status, detail="", source="simulation"):
+def push_exec_log(workflow_name, action, status, detail="", source=""):
     with _lock:
         exec_log.append({
             "ts":       datetime.now().isoformat(),
