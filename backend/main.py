@@ -75,6 +75,14 @@ app.add_middleware(CORSMiddleware,
     allow_origins=["http://localhost:5173"],
     allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+import asyncio as _asyncio
+_event_loop: _asyncio.AbstractEventLoop = None
+
+@app.on_event("startup")
+async def _capture_event_loop():
+    global _event_loop
+    _event_loop = _asyncio.get_running_loop()
+
 # ── Path setup ────────────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(__file__))
 

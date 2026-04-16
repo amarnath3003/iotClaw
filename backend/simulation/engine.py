@@ -150,13 +150,19 @@ def _try_broadcast():
         import asyncio, importlib
         main_mod = importlib.import_module("main")
         manager  = getattr(main_mod, "ws_manager", None)
-        if manager and manager._conns:
-            state = get_state()
-            asyncio.run(manager.broadcast({
-                "type":     "state",
-                "data":     state,
-                "sim_mode": get_simulation_mode(),
-            }))
+        if not manager or not manager._conns:
+            return
+        loop = getattr(main_mod, "_event_loop", None)
+        if loop is None or loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(
+            manager.broadcast({
+                "type": "state",
+                "data": get_state(),
+                "sim_mode": _simulation_mode,
+            }),
+            loop,
+        )
     except Exception:
         pass   # WebSocket not ready yet or no clients — silently skip
 
