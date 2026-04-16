@@ -43,7 +43,6 @@ class WSManager:
         if ws in self._conns:
             self._conns.remove(ws)
     async def broadcast(self, data: dict):
-        import asyncio
         dead = []
         for ws in list(self._conns):
             try:
